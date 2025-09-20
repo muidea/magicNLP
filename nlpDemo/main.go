@@ -19,9 +19,11 @@ type EmbedResponse struct {
 func main() {
 	text := "DuckDB 是一个内存分析型数据库"
 
+	localServer := "http://127.0.0.1:8080"
+	// remoteServer := "https://api.mulife.vip"
 	// 构造请求
 	reqBody, _ := json.Marshal(EmbedRequest{Text: text})
-	resp, err := http.Post("https://api.mulife.vip/bge/embed", "application/json", bytes.NewBuffer(reqBody))
+	resp, err := http.Post(fmt.Sprintf("%s/api/v1/nlp_service/embedding/single", localServer), "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Fatal("请求失败:", err)
 	}

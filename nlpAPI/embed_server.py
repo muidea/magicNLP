@@ -1,15 +1,19 @@
-# merged_server_multilang.py
 from flask import Flask, request, jsonify
 import jieba
 from sentence_transformers import SentenceTransformer, util
 import re
 import os
-import numpy as np
 
 app = Flask(__name__)
 
-# 加载本地模型
-model = SentenceTransformer("BAAI/bge-small-zh-v1.5", local_files_only=True)
+# ===========================
+# 模型加载（可通过环境变量选择）
+# ===========================
+MODEL_NAME = os.getenv("EMBED_MODEL", "thenlper/gte-small")
+LOCAL_FILES_ONLY = bool(os.getenv("LOCAL_FILES_ONLY", "True") == "True")
+
+print(f"Loading embedding model: {MODEL_NAME}, local_files_only={LOCAL_FILES_ONLY}")
+model = SentenceTransformer(MODEL_NAME, local_files_only=LOCAL_FILES_ONLY)
 
 # ===========================
 # 停用词 & 黑名单加载
@@ -34,22 +38,18 @@ blacklist = load_wordlist("blacklist.txt")
 # 文本预处理
 # ===========================
 def extract_english_words(text):
-    """提取英文单词"""
     return re.findall(r'\b[a-zA-Z]{2,}\b', text.lower())
 
 def clean_words(words, stopwords):
-    """去掉停用词和黑名单"""
     return [w for w in words if w not in stopwords and w not in blacklist]
 
 # ===========================
 # 关键词提取函数
 # ===========================
 def extract_keywords(text, top_k=10, business_context=None, sim_threshold=0.3):
-    # 分词
     words_zh = [w for w in jieba.cut(text) if len(w) > 1]
     words_en = extract_english_words(text)
 
-    # 去停用词和黑名单
     words = clean_words(words_zh, stopwords_zh).copy()
     words += clean_words(words_en, stopwords_en)
     words = list(set(words))
@@ -57,18 +57,15 @@ def extract_keywords(text, top_k=10, business_context=None, sim_threshold=0.3):
     if not words:
         return []
 
-    # 基于语义相似度的关键词排序
     text_emb = model.encode([text], convert_to_tensor=True, normalize_embeddings=True)
     word_embs = model.encode(words, convert_to_tensor=True, normalize_embeddings=True)
     cos_scores = util.cos_sim(text_emb, word_embs)[0].cpu().numpy()
     word_score_pairs = list(zip(words, cos_scores))
 
-    # 如果没有业务语境，直接取前 top_k
     if not business_context:
         word_score_pairs.sort(key=lambda x: x[1], reverse=True)
         return [w for w, _ in word_score_pairs[:top_k]]
 
-    # 有业务语境时，进一步相似度过滤
     biz_emb = model.encode([business_context], convert_to_tensor=True, normalize_embeddings=True)[0]
     filtered_pairs = []
     for word, score in word_score_pairs:
@@ -81,17 +78,21 @@ def extract_keywords(text, top_k=10, business_context=None, sim_threshold=0.3):
     return [w for w, _ in filtered_pairs[:top_k]]
 
 # ===========================
-# 单条文本 embedding 接口
+# API 接口统一前缀 + 服务名
 # ===========================
-@app.route("/bge/embed", methods=["POST"])
-def embed():
+API_PREFIX = "/api/v1/nlp_service"
+
+# ---------------------------
+# 单条文本 embedding
+# ---------------------------
+@app.route(f"{API_PREFIX}/embedding/single", methods=["POST"])
+def embed_single():
     """
     单条文本向量生成接口
-    请求格式:
-    {
-        "text": "字符串文本"
-    }
-    响应格式:
+    请求参数:
+    - text (str, 必选): 待生成向量的文本内容
+
+    返回示例:
     {
         "vector": [浮点数向量列表]
     }
@@ -100,22 +101,20 @@ def embed():
     text = data.get("text", "")
     if not text:
         return jsonify({"error": "No text"}), 400
-
-    vector = model.encode([text])[0].tolist()
+    vector = model.encode([text], normalize_embeddings=True)[0].tolist()
     return jsonify({"vector": vector})
 
-# ===========================
-# 批量文本 embedding 接口
-# ===========================
-@app.route("/bge/embed_bulk", methods=["POST"])
-def embed_bulk():
+# ---------------------------
+# 批量文本 embedding
+# ---------------------------
+@app.route(f"{API_PREFIX}/embedding/batch", methods=["POST"])
+def embed_batch():
     """
     批量文本向量生成接口
-    请求格式:
-    {
-        "texts": ["文本1", "文本2", ...]
-    }
-    响应格式:
+    请求参数:
+    - texts (list[str], 必选): 待生成向量的文本列表，至少包含一条文本
+
+    返回示例:
     {
         "vectors": [
             [向量1], [向量2], ...
@@ -126,25 +125,23 @@ def embed_bulk():
     texts = data.get("texts", [])
     if not texts or not isinstance(texts, list):
         return jsonify({"error": "Invalid texts"}), 400
-
-    vectors = model.encode(texts).tolist()
+    vectors = model.encode(texts, normalize_embeddings=True).tolist()
     return jsonify({"vectors": vectors})
 
-# ===========================
-# 中文+英文关键词提取接口
-# ===========================
-@app.route("/bge/keywords", methods=["POST"])
+# ---------------------------
+# 中文+英文关键词提取
+# ---------------------------
+@app.route(f"{API_PREFIX}/keywords/extract", methods=["POST"])
 def keywords_api():
     """
     中文+英文关键词提取接口
-    请求格式:
-    {
-        "text": "字符串文本",
-        "top_k": 关键词数量（整数，可选，默认10）,
-        "business_context": "业务语境字符串，可选",
-        "threshold": 相似度阈值（浮点数，可选，默认0.3）
-    }
-    响应格式:
+    请求参数:
+    - text (str, 必选): 待提取关键词的文本
+    - top_k (int, 可选, 默认10): 返回关键词数量
+    - business_context (str, 可选): 业务语境，用于语义过滤关键词
+    - threshold (float, 可选, 默认0.3): 业务语境相似度阈值，范围 0~1
+
+    返回示例:
     {
         "keywords": ["关键词1", "关键词2", ...]
     }
@@ -168,6 +165,22 @@ def keywords_api():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ---------------------------
+# 健康检查接口
+# ---------------------------
+@app.route(f"{API_PREFIX}/health", methods=["GET"])
+def health_check():
+    """
+    服务健康检查接口
+    请求参数: 无
+    返回示例:
+    {
+        "status": "ok",
+        "model": "BAAI/bge-small-zh-v1.5"
+    }
+    """
+    return jsonify({"status": "ok", "model": MODEL_NAME})
 
 # ===========================
 # 启动服务

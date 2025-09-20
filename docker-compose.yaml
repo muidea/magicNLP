@@ -1,7 +1,7 @@
 services:
-  bge_api_server:
+  nlp_api_server:
     image: muidea/sbert-runner:1.0.0
-    container_name: bge_api_server
+    container_name: nlp_api_server
     working_dir: /app
     volumes:
       - ${PWD}/embedding/embed_server.py:/app/embed_server.py
