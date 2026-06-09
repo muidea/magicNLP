@@ -205,7 +205,7 @@ pip install openai
 
 ## Go demo
 
-启动服务后运行：
+启动服务后运行默认示例。默认会调用 OpenAI 兼容接口 `POST /v1/embeddings`：
 
 ```bash
 go run ./nlpDemo
@@ -215,6 +215,44 @@ go run ./nlpDemo
 
 ```bash
 NLP_SERVER=http://127.0.0.1:8080 go run ./nlpDemo
+```
+
+也可以通过参数指定服务地址：
+
+```bash
+go run ./nlpDemo -server http://127.0.0.1:8010
+```
+
+支持的调用模式：
+
+```bash
+# 健康检查
+go run ./nlpDemo -mode health
+
+# OpenAI 兼容 embeddings
+go run ./nlpDemo -mode openai -texts 'DuckDB 是一个内存分析型数据库|hello world'
+
+# Ollama 兼容 embed
+go run ./nlpDemo -mode ollama -texts 'DuckDB 是一个内存分析型数据库|hello world'
+
+# 历史单条 embedding
+go run ./nlpDemo -mode single -text 'DuckDB 是一个内存分析型数据库'
+
+# 历史批量 embedding
+go run ./nlpDemo -mode batch -texts 'DuckDB 是一个内存分析型数据库|hello world'
+
+# 关键词提取
+go run ./nlpDemo -mode keywords \
+  -text 'DuckDB 是一个内存分析型数据库，适合实时分析和嵌入式分析场景' \
+  -top-k 5 \
+  -context '数据库 分析 OLAP' \
+  -threshold 0.3
+```
+
+查看全部参数：
+
+```bash
+go run ./nlpDemo -h
 ```
 
 ## 依赖
