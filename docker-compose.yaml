@@ -5,8 +5,11 @@ services:
     image: muidea/magicnlp:latest
     container_name: nlp_api_server
     environment:
-      EMBED_MODEL: ${EMBED_MODEL:-thenlper/gte-small}
+      EMBED_MODEL: ${EMBED_MODEL:-intfloat/multilingual-e5-small}
       LOCAL_FILES_ONLY: ${LOCAL_FILES_ONLY:-false}
+      EMBED_DEFAULT_INPUT_TYPE: "${EMBED_DEFAULT_INPUT_TYPE:-passage}"
+      EMBED_QUERY_PREFIX: "${EMBED_QUERY_PREFIX:-query: }"
+      EMBED_PASSAGE_PREFIX: "${EMBED_PASSAGE_PREFIX:-passage: }"
       HF_HOME: /root/.cache/huggingface
     volumes:
       - huggingface_cache:/root/.cache/huggingface

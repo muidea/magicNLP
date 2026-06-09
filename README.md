@@ -1,6 +1,6 @@
 # magicNLP
 
-magicNLP 是一个轻量级 NLP HTTP 服务，基于 `sentence-transformers` 提供文本向量生成和中英文关键词提取能力。服务默认模型为 `thenlper/gte-small`，也可以通过环境变量切换为中文模型，例如 `BAAI/bge-small-zh-v1.5`。
+magicNLP 是一个轻量级 NLP HTTP 服务，基于 `sentence-transformers` 提供文本向量生成和中英文关键词提取能力。服务默认面向小型知识库/RAG 场景，使用 `intfloat/multilingual-e5-small`，并支持 E5 模型推荐的 `query:` / `passage:` 前缀约定。
 
 ## 功能
 
@@ -78,14 +78,17 @@ python embed_server.py
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `EMBED_MODEL` | `thenlper/gte-small` | sentence-transformers 模型名或本地模型路径 |
+| `EMBED_MODEL` | `intfloat/multilingual-e5-small` | sentence-transformers 模型名或本地模型路径 |
 | `LOCAL_FILES_ONLY` | `false` | 是否只使用本地 Hugging Face 缓存；离线部署设为 `true` |
+| `EMBED_DEFAULT_INPUT_TYPE` | `passage` | 默认 embedding 输入类型，可选 `passage`、`query`、`raw` |
+| `EMBED_QUERY_PREFIX` | `query: ` | `input_type=query` 时自动添加的前缀 |
+| `EMBED_PASSAGE_PREFIX` | `passage: ` | `input_type=passage` 时自动添加的前缀 |
 | `NLP_PORT` | `8010` | Docker Compose 暴露端口 |
 | `GUNICORN_WORKERS` | `1` | Gunicorn worker 数量 |
 | `GUNICORN_THREADS` | `4` | Gunicorn 每个 worker 的线程数 |
 | `GUNICORN_TIMEOUT` | `300` | Gunicorn 请求超时时间，单位秒 |
 
-中文场景可在 `.env` 中切换模型：
+中文优先、完全离线或已有缓存场景可在 `.env` 中切换模型：
 
 ```env
 EMBED_MODEL=BAAI/bge-small-zh-v1.5
@@ -98,6 +101,15 @@ LOCAL_FILES_ONLY=false
 LOCAL_FILES_ONLY=true
 ```
 
+## 小型知识库/RAG 推荐用法
+
+默认模型 `intfloat/multilingual-e5-small` 是 384 维向量，适合 DuckDB-VSS、Qdrant、Milvus-Lite 等轻量向量库。为了获得更好的中英文双语召回效果，建议区分文档和查询：
+
+- 灌入知识库文档时传 `input_type=passage`，服务会自动添加 `passage: ` 前缀。
+- 用户检索问题时传 `input_type=query`，服务会自动添加 `query: ` 前缀。
+- 如果调用方已经自行添加前缀，服务会识别 `query: ` / `passage: `，不会重复添加。
+- 需要完全原样向量化时传 `input_type=raw`。
+
 ## API 示例
 
 ### OpenAI 兼容 embeddings
@@ -106,7 +118,8 @@ LOCAL_FILES_ONLY=true
 curl http://127.0.0.1:8010/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "thenlper/gte-small",
+    "model": "intfloat/multilingual-e5-small",
+    "input_type": "passage",
     "input": ["DuckDB 是一个内存分析型数据库", "hello world"]
   }'
 ```
@@ -123,7 +136,7 @@ curl http://127.0.0.1:8010/v1/embeddings \
       "index": 0
     }
   ],
-  "model": "thenlper/gte-small",
+  "model": "intfloat/multilingual-e5-small",
   "usage": {
     "prompt_tokens": 10,
     "total_tokens": 10
@@ -138,6 +151,7 @@ curl http://127.0.0.1:8010/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{
     "input": "DuckDB 是一个内存分析型数据库",
+    "input_type": "query",
     "encoding_format": "base64"
   }'
 ```
@@ -148,7 +162,8 @@ curl http://127.0.0.1:8010/v1/embeddings \
 curl http://127.0.0.1:8010/api/embed \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "thenlper/gte-small",
+    "model": "intfloat/multilingual-e5-small",
+    "input_type": "passage",
     "input": ["DuckDB 是一个内存分析型数据库", "hello world"]
   }'
 ```
@@ -158,7 +173,7 @@ curl http://127.0.0.1:8010/api/embed \
 ```bash
 curl http://127.0.0.1:8010/api/v1/nlp_service/embedding/single \
   -H 'Content-Type: application/json' \
-  -d '{"text":"DuckDB 是一个内存分析型数据库"}'
+  -d '{"text":"DuckDB 是一个内存分析型数据库","input_type":"passage"}'
 ```
 
 ### 历史批量 embedding
@@ -166,7 +181,7 @@ curl http://127.0.0.1:8010/api/v1/nlp_service/embedding/single \
 ```bash
 curl http://127.0.0.1:8010/api/v1/nlp_service/embedding/batch \
   -H 'Content-Type: application/json' \
-  -d '{"texts":["DuckDB 是一个内存分析型数据库","hello world"]}'
+  -d '{"texts":["DuckDB 是一个内存分析型数据库","hello world"],"input_type":"passage"}'
 ```
 
 ### 关键词提取
@@ -190,8 +205,9 @@ from openai import OpenAI
 client = OpenAI(base_url="http://127.0.0.1:8010/v1", api_key="not-needed")
 
 response = client.embeddings.create(
-    model="thenlper/gte-small",
-    input=["DuckDB 是一个内存分析型数据库"]
+    model="intfloat/multilingual-e5-small",
+    input=["DuckDB 是一个内存分析型数据库"],
+    extra_body={"input_type": "query"}
 )
 
 print(len(response.data[0].embedding))
@@ -230,16 +246,16 @@ go run ./nlpDemo -server http://127.0.0.1:8010
 go run ./nlpDemo -mode health
 
 # OpenAI 兼容 embeddings
-go run ./nlpDemo -mode openai -texts 'DuckDB 是一个内存分析型数据库|hello world'
+go run ./nlpDemo -mode openai -input-type passage -texts 'DuckDB 是一个内存分析型数据库|hello world'
 
 # Ollama 兼容 embed
-go run ./nlpDemo -mode ollama -texts 'DuckDB 是一个内存分析型数据库|hello world'
+go run ./nlpDemo -mode ollama -input-type passage -texts 'DuckDB 是一个内存分析型数据库|hello world'
 
 # 历史单条 embedding
-go run ./nlpDemo -mode single -text 'DuckDB 是一个内存分析型数据库'
+go run ./nlpDemo -mode single -input-type query -text 'DuckDB 是一个内存分析型数据库'
 
 # 历史批量 embedding
-go run ./nlpDemo -mode batch -texts 'DuckDB 是一个内存分析型数据库|hello world'
+go run ./nlpDemo -mode batch -input-type passage -texts 'DuckDB 是一个内存分析型数据库|hello world'
 
 # 关键词提取
 go run ./nlpDemo -mode keywords \

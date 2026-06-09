@@ -19,6 +19,7 @@ type config struct {
 	server          string
 	mode            string
 	model           string
+	inputType       string
 	text            string
 	texts           string
 	topK            int
@@ -28,7 +29,8 @@ type config struct {
 }
 
 type legacySingleRequest struct {
-	Text string `json:"text"`
+	Text      string `json:"text"`
+	InputType string `json:"input_type,omitempty"`
 }
 
 type legacySingleResponse struct {
@@ -36,7 +38,8 @@ type legacySingleResponse struct {
 }
 
 type legacyBatchRequest struct {
-	Texts []string `json:"texts"`
+	Texts     []string `json:"texts"`
+	InputType string   `json:"input_type,omitempty"`
 }
 
 type legacyBatchResponse struct {
@@ -44,8 +47,9 @@ type legacyBatchResponse struct {
 }
 
 type openAIEmbeddingRequest struct {
-	Model string   `json:"model,omitempty"`
-	Input []string `json:"input"`
+	Model     string   `json:"model,omitempty"`
+	Input     []string `json:"input"`
+	InputType string   `json:"input_type,omitempty"`
 }
 
 type openAIEmbeddingResponse struct {
@@ -63,8 +67,9 @@ type openAIEmbeddingResponse struct {
 }
 
 type ollamaEmbedRequest struct {
-	Model string   `json:"model,omitempty"`
-	Input []string `json:"input"`
+	Model     string   `json:"model,omitempty"`
+	Input     []string `json:"input"`
+	InputType string   `json:"input_type,omitempty"`
 }
 
 type ollamaEmbedResponse struct {
@@ -87,8 +92,9 @@ type keywordResponse struct {
 }
 
 type healthResponse struct {
-	Status string `json:"status"`
-	Model  string `json:"model"`
+	Status           string `json:"status"`
+	Model            string `json:"model"`
+	DefaultInputType string `json:"default_input_type"`
 }
 
 func main() {
@@ -122,7 +128,8 @@ func parseFlags() config {
 	cfg := config{}
 	flag.StringVar(&cfg.server, "server", server, "magicNLP 服务地址，也可用 NLP_SERVER 环境变量")
 	flag.StringVar(&cfg.mode, "mode", "openai", "调用模式: health, single, batch, openai, ollama, keywords")
-	flag.StringVar(&cfg.model, "model", "thenlper/gte-small", "请求中携带的模型名")
+	flag.StringVar(&cfg.model, "model", "intfloat/multilingual-e5-small", "请求中携带的模型名")
+	flag.StringVar(&cfg.inputType, "input-type", "passage", "embedding 输入类型: passage, query, raw")
 	flag.StringVar(&cfg.text, "text", defaultText, "单条输入文本")
 	flag.StringVar(&cfg.texts, "texts", "", "多条输入文本，使用 | 分隔；为空时使用 -text 和 hello world")
 	flag.IntVar(&cfg.topK, "top-k", 5, "关键词提取数量")
@@ -139,18 +146,18 @@ func parseFlags() config {
 func runHealth(client *http.Client, cfg config) {
 	var response healthResponse
 	getJSON(client, cfg.server+"/health", &response)
-	fmt.Printf("服务状态: %s\n模型: %s\n", response.Status, response.Model)
+	fmt.Printf("服务状态: %s\n模型: %s\n默认输入类型: %s\n", response.Status, response.Model, response.DefaultInputType)
 }
 
 func runLegacySingle(client *http.Client, cfg config) {
 	var response legacySingleResponse
-	postJSON(client, cfg.server+"/api/v1/nlp_service/embedding/single", legacySingleRequest{Text: cfg.text}, &response)
+	postJSON(client, cfg.server+"/api/v1/nlp_service/embedding/single", legacySingleRequest{Text: cfg.text, InputType: cfg.inputType}, &response)
 	printVectorSummary("历史单条 embedding", response.Vector)
 }
 
 func runLegacyBatch(client *http.Client, cfg config) {
 	var response legacyBatchResponse
-	postJSON(client, cfg.server+"/api/v1/nlp_service/embedding/batch", legacyBatchRequest{Texts: inputTexts(cfg)}, &response)
+	postJSON(client, cfg.server+"/api/v1/nlp_service/embedding/batch", legacyBatchRequest{Texts: inputTexts(cfg), InputType: cfg.inputType}, &response)
 
 	fmt.Printf("历史批量 embedding: %d 条\n", len(response.Vectors))
 	for index, vector := range response.Vectors {
@@ -161,8 +168,9 @@ func runLegacyBatch(client *http.Client, cfg config) {
 func runOpenAIEmbedding(client *http.Client, cfg config) {
 	var response openAIEmbeddingResponse
 	request := openAIEmbeddingRequest{
-		Model: cfg.model,
-		Input: inputTexts(cfg),
+		Model:     cfg.model,
+		Input:     inputTexts(cfg),
+		InputType: cfg.inputType,
 	}
 	postJSON(client, cfg.server+"/v1/embeddings", request, &response)
 
@@ -175,8 +183,9 @@ func runOpenAIEmbedding(client *http.Client, cfg config) {
 func runOllamaEmbed(client *http.Client, cfg config) {
 	var response ollamaEmbedResponse
 	request := ollamaEmbedRequest{
-		Model: cfg.model,
-		Input: inputTexts(cfg),
+		Model:     cfg.model,
+		Input:     inputTexts(cfg),
+		InputType: cfg.inputType,
 	}
 	postJSON(client, cfg.server+"/api/embed", request, &response)
 

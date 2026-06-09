@@ -4,8 +4,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/root/.cache/huggingface \
-    EMBED_MODEL=thenlper/gte-small \
-    LOCAL_FILES_ONLY=false
+    EMBED_MODEL=intfloat/multilingual-e5-small \
+    LOCAL_FILES_ONLY=false \
+    EMBED_DEFAULT_INPUT_TYPE=passage \
+    EMBED_QUERY_PREFIX="query: " \
+    EMBED_PASSAGE_PREFIX="passage: "
 
 WORKDIR /app
 

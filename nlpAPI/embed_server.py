@@ -12,8 +12,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ===========================
 # 模型加载（可通过环境变量选择）
 # ===========================
-MODEL_NAME = os.getenv("EMBED_MODEL", "thenlper/gte-small")
+MODEL_NAME = os.getenv("EMBED_MODEL", "intfloat/multilingual-e5-small")
 LOCAL_FILES_ONLY = os.getenv("LOCAL_FILES_ONLY", "false").lower() in ("1", "true", "yes", "on")
+EMBED_DEFAULT_INPUT_TYPE = os.getenv("EMBED_DEFAULT_INPUT_TYPE", "passage").lower()
+EMBED_QUERY_PREFIX = os.getenv("EMBED_QUERY_PREFIX", "query: ")
+EMBED_PASSAGE_PREFIX = os.getenv("EMBED_PASSAGE_PREFIX", "passage: ")
 
 print(f"Loading embedding model: {MODEL_NAME}, local_files_only={LOCAL_FILES_ONLY}")
 model = SentenceTransformer(MODEL_NAME, local_files_only=LOCAL_FILES_ONLY)
@@ -79,8 +82,35 @@ def parse_text_input(value, field_name="input"):
 
     raise TypeError(f"{field_name} must be a string or an array of strings")
 
-def encode_texts(texts):
-    return model.encode(texts, normalize_embeddings=True).tolist()
+def normalize_input_type(input_type=None):
+    input_type = (input_type or EMBED_DEFAULT_INPUT_TYPE).lower()
+    if input_type in ("query", "q"):
+        return "query"
+    if input_type in ("passage", "document", "doc"):
+        return "passage"
+    if input_type in ("raw", "none", ""):
+        return "raw"
+
+    raise ValueError("input_type must be 'query', 'passage', or 'raw'")
+
+def has_embedding_prefix(text):
+    lowered = text.lower()
+    return lowered.startswith(EMBED_QUERY_PREFIX.lower()) or lowered.startswith(EMBED_PASSAGE_PREFIX.lower())
+
+def prepare_embedding_texts(texts, input_type=None):
+    normalized_input_type = normalize_input_type(input_type)
+    if normalized_input_type == "raw":
+        return texts, normalized_input_type
+
+    prefix = EMBED_QUERY_PREFIX if normalized_input_type == "query" else EMBED_PASSAGE_PREFIX
+    return [
+        text if has_embedding_prefix(text) else f"{prefix}{text}"
+        for text in texts
+    ], normalized_input_type
+
+def encode_texts(texts, input_type=None):
+    prepared_texts, _ = prepare_embedding_texts(texts, input_type)
+    return model.encode(prepared_texts, normalize_embeddings=True).tolist()
 
 def count_prompt_tokens(texts):
     tokenizer = getattr(model, "tokenizer", None)
@@ -99,11 +129,12 @@ def encode_vector_base64(vector):
     raw = np.asarray(vector, dtype="float32").tobytes()
     return base64.b64encode(raw).decode("ascii")
 
-def build_openai_embeddings_response(texts, requested_model=None, encoding_format="float"):
+def build_openai_embeddings_response(texts, requested_model=None, encoding_format="float", input_type=None):
     if encoding_format not in ("float", "base64"):
         raise ValueError("encoding_format must be 'float' or 'base64'")
 
-    vectors = encode_texts(texts)
+    prepared_texts, _ = prepare_embedding_texts(texts, input_type)
+    vectors = model.encode(prepared_texts, normalize_embeddings=True).tolist()
     data = []
     for index, vector in enumerate(vectors):
         embedding = encode_vector_base64(vector) if encoding_format == "base64" else vector
@@ -113,7 +144,7 @@ def build_openai_embeddings_response(texts, requested_model=None, encoding_forma
             "index": index
         })
 
-    prompt_tokens = count_prompt_tokens(texts)
+    prompt_tokens = count_prompt_tokens(prepared_texts)
     return {
         "object": "list",
         "data": data,
@@ -124,9 +155,10 @@ def build_openai_embeddings_response(texts, requested_model=None, encoding_forma
         }
     }
 
-def build_ollama_embed_response(texts, requested_model=None, started_at=None):
+def build_ollama_embed_response(texts, requested_model=None, started_at=None, input_type=None):
     started_at = started_at or time.perf_counter()
-    vectors = encode_texts(texts)
+    prepared_texts, _ = prepare_embedding_texts(texts, input_type)
+    vectors = model.encode(prepared_texts, normalize_embeddings=True).tolist()
     duration_ns = int((time.perf_counter() - started_at) * 1_000_000_000)
 
     return {
@@ -134,7 +166,7 @@ def build_ollama_embed_response(texts, requested_model=None, started_at=None):
         "embeddings": vectors,
         "total_duration": duration_ns,
         "load_duration": 0,
-        "prompt_eval_count": count_prompt_tokens(texts)
+        "prompt_eval_count": count_prompt_tokens(prepared_texts)
     }
 
 # ===========================
@@ -195,8 +227,11 @@ def embed_single():
     text = data.get("text", "")
     if not text:
         return jsonify({"error": "No text"}), 400
-    vector = encode_texts([text])[0]
-    return jsonify({"vector": vector})
+    try:
+        vector = encode_texts([text], input_type=data.get("input_type"))[0]
+        return jsonify({"vector": vector})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 # ---------------------------
 # 批量文本 embedding
@@ -219,8 +254,11 @@ def embed_batch():
     texts = data.get("texts", [])
     if not texts or not isinstance(texts, list):
         return jsonify({"error": "Invalid texts"}), 400
-    vectors = encode_texts(texts)
-    return jsonify({"vectors": vectors})
+    try:
+        vectors = encode_texts(texts, input_type=data.get("input_type"))
+        return jsonify({"vectors": vectors})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 # ---------------------------
 # OpenAI 兼容 embeddings
@@ -254,7 +292,8 @@ def openai_embeddings_api():
         response = build_openai_embeddings_response(
             texts,
             requested_model=data.get("model"),
-            encoding_format=encoding_format
+            encoding_format=encoding_format,
+            input_type=data.get("input_type")
         )
         return jsonify(response)
     except (TypeError, ValueError) as e:
@@ -289,7 +328,8 @@ def ollama_embed_api():
         return jsonify(build_ollama_embed_response(
             texts,
             requested_model=data.get("model"),
-            started_at=started_at
+            started_at=started_at,
+            input_type=data.get("input_type")
         ))
     except (TypeError, ValueError) as e:
         return error_response(str(e), 400, "input")
@@ -318,7 +358,7 @@ def ollama_legacy_embeddings_api():
         text = parse_text_input(prompt, "prompt")
         if len(text) != 1:
             return error_response("prompt must be a single string", 400, "prompt")
-        vector = encode_texts(text)[0]
+        vector = encode_texts(text, input_type=data.get("input_type"))[0]
         return jsonify({"embedding": vector})
     except (TypeError, ValueError) as e:
         return error_response(str(e), 400, "prompt")
@@ -376,7 +416,11 @@ def health_check():
         "model": "BAAI/bge-small-zh-v1.5"
     }
     """
-    return jsonify({"status": "ok", "model": MODEL_NAME})
+    return jsonify({
+        "status": "ok",
+        "model": MODEL_NAME,
+        "default_input_type": EMBED_DEFAULT_INPUT_TYPE
+    })
 
 # ===========================
 # 启动服务
