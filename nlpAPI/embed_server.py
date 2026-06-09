@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify
 import jieba
 from sentence_transformers import SentenceTransformer, util
+import base64
 import re
 import os
+import time
 
 app = Flask(__name__)
 
@@ -42,6 +44,97 @@ def extract_english_words(text):
 
 def clean_words(words, stopwords):
     return [w for w in words if w not in stopwords and w not in blacklist]
+
+# ===========================
+# Embedding 公共函数
+# ===========================
+def json_payload():
+    return request.get_json(silent=True) or {}
+
+def error_response(message, status_code=400, param=None, error_type="invalid_request_error"):
+    return jsonify({
+        "error": {
+            "message": message,
+            "type": error_type,
+            "param": param,
+            "code": None
+        }
+    }), status_code
+
+def parse_text_input(value, field_name="input"):
+    if isinstance(value, str):
+        if not value:
+            raise ValueError(f"{field_name} must not be empty")
+        return [value]
+
+    if isinstance(value, list):
+        if not value:
+            raise ValueError(f"{field_name} must not be empty")
+        if not all(isinstance(item, str) for item in value):
+            raise TypeError(f"{field_name} must be a string or an array of strings")
+        if any(item == "" for item in value):
+            raise ValueError(f"{field_name} contains empty text")
+        return value
+
+    raise TypeError(f"{field_name} must be a string or an array of strings")
+
+def encode_texts(texts):
+    return model.encode(texts, normalize_embeddings=True).tolist()
+
+def count_prompt_tokens(texts):
+    tokenizer = getattr(model, "tokenizer", None)
+    if tokenizer is not None:
+        try:
+            tokenized = tokenizer(texts, add_special_tokens=True)
+            return sum(len(input_ids) for input_ids in tokenized.get("input_ids", []))
+        except Exception:
+            pass
+
+    return sum(len(text) for text in texts)
+
+def encode_vector_base64(vector):
+    import numpy as np
+
+    raw = np.asarray(vector, dtype="float32").tobytes()
+    return base64.b64encode(raw).decode("ascii")
+
+def build_openai_embeddings_response(texts, requested_model=None, encoding_format="float"):
+    if encoding_format not in ("float", "base64"):
+        raise ValueError("encoding_format must be 'float' or 'base64'")
+
+    vectors = encode_texts(texts)
+    data = []
+    for index, vector in enumerate(vectors):
+        embedding = encode_vector_base64(vector) if encoding_format == "base64" else vector
+        data.append({
+            "object": "embedding",
+            "embedding": embedding,
+            "index": index
+        })
+
+    prompt_tokens = count_prompt_tokens(texts)
+    return {
+        "object": "list",
+        "data": data,
+        "model": requested_model or MODEL_NAME,
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "total_tokens": prompt_tokens
+        }
+    }
+
+def build_ollama_embed_response(texts, requested_model=None, started_at=None):
+    started_at = started_at or time.perf_counter()
+    vectors = encode_texts(texts)
+    duration_ns = int((time.perf_counter() - started_at) * 1_000_000_000)
+
+    return {
+        "model": requested_model or MODEL_NAME,
+        "embeddings": vectors,
+        "total_duration": duration_ns,
+        "load_duration": 0,
+        "prompt_eval_count": count_prompt_tokens(texts)
+    }
 
 # ===========================
 # 关键词提取函数
@@ -97,11 +190,11 @@ def embed_single():
         "vector": [浮点数向量列表]
     }
     """
-    data = request.json
+    data = json_payload()
     text = data.get("text", "")
     if not text:
         return jsonify({"error": "No text"}), 400
-    vector = model.encode([text], normalize_embeddings=True)[0].tolist()
+    vector = encode_texts([text])[0]
     return jsonify({"vector": vector})
 
 # ---------------------------
@@ -121,12 +214,113 @@ def embed_batch():
         ]
     }
     """
-    data = request.json
+    data = json_payload()
     texts = data.get("texts", [])
     if not texts or not isinstance(texts, list):
         return jsonify({"error": "Invalid texts"}), 400
-    vectors = model.encode(texts, normalize_embeddings=True).tolist()
+    vectors = encode_texts(texts)
     return jsonify({"vectors": vectors})
+
+# ---------------------------
+# OpenAI 兼容 embeddings
+# ---------------------------
+@app.route("/v1/embeddings", methods=["POST"])
+@app.route("/api/v1/embeddings", methods=["POST"])
+@app.route(f"{API_PREFIX}/embeddings", methods=["POST"])
+def openai_embeddings_api():
+    """
+    OpenAI 兼容向量生成接口
+    请求格式:
+    {
+        "model": "模型名，可选",
+        "input": "文本" 或 ["文本1", "文本2"],
+        "encoding_format": "float" 或 "base64，可选，默认 float"
+    }
+    响应格式:
+    {
+        "object": "list",
+        "data": [
+            {"object": "embedding", "embedding": [...], "index": 0}
+        ],
+        "model": "模型名",
+        "usage": {"prompt_tokens": 10, "total_tokens": 10}
+    }
+    """
+    data = json_payload()
+    try:
+        texts = parse_text_input(data.get("input"), "input")
+        encoding_format = data.get("encoding_format", "float")
+        response = build_openai_embeddings_response(
+            texts,
+            requested_model=data.get("model"),
+            encoding_format=encoding_format
+        )
+        return jsonify(response)
+    except (TypeError, ValueError) as e:
+        return error_response(str(e), 400, "input")
+
+# ---------------------------
+# Ollama 兼容 embed
+# ---------------------------
+@app.route("/api/embed", methods=["POST"])
+@app.route(f"{API_PREFIX}/embed", methods=["POST"])
+def ollama_embed_api():
+    """
+    Ollama 兼容向量生成接口
+    请求格式:
+    {
+        "model": "模型名，可选",
+        "input": "文本" 或 ["文本1", "文本2"]
+    }
+    响应格式:
+    {
+        "model": "模型名",
+        "embeddings": [[...]],
+        "total_duration": 123,
+        "load_duration": 0,
+        "prompt_eval_count": 10
+    }
+    """
+    started_at = time.perf_counter()
+    data = json_payload()
+    try:
+        texts = parse_text_input(data.get("input"), "input")
+        return jsonify(build_ollama_embed_response(
+            texts,
+            requested_model=data.get("model"),
+            started_at=started_at
+        ))
+    except (TypeError, ValueError) as e:
+        return error_response(str(e), 400, "input")
+
+# ---------------------------
+# Ollama 旧版 embeddings
+# ---------------------------
+@app.route("/api/embeddings", methods=["POST"])
+@app.route(f"{API_PREFIX}/embedding", methods=["POST"])
+def ollama_legacy_embeddings_api():
+    """
+    Ollama 旧版单条向量接口
+    请求格式:
+    {
+        "model": "模型名，可选",
+        "prompt": "文本"
+    }
+    响应格式:
+    {
+        "embedding": [...]
+    }
+    """
+    data = json_payload()
+    prompt = data.get("prompt", data.get("input", ""))
+    try:
+        text = parse_text_input(prompt, "prompt")
+        if len(text) != 1:
+            return error_response("prompt must be a single string", 400, "prompt")
+        vector = encode_texts(text)[0]
+        return jsonify({"embedding": vector})
+    except (TypeError, ValueError) as e:
+        return error_response(str(e), 400, "prompt")
 
 # ---------------------------
 # 中文+英文关键词提取
