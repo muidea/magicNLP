@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 type EmbedRequest struct {
@@ -19,7 +20,10 @@ type EmbedResponse struct {
 func main() {
 	text := "DuckDB 是一个内存分析型数据库"
 
-	localServer := "http://127.0.0.1:8080"
+	localServer := os.Getenv("NLP_SERVER")
+	if localServer == "" {
+		localServer = "http://127.0.0.1:8010"
+	}
 	// remoteServer := "https://api.mulife.vip"
 	// 构造请求
 	reqBody, _ := json.Marshal(EmbedRequest{Text: text})
@@ -40,5 +44,9 @@ func main() {
 	}
 
 	fmt.Println("向量长度:", len(embedResp.Vector))
-	fmt.Println("前5个维度:", embedResp.Vector[:5])
+	previewSize := 5
+	if len(embedResp.Vector) < previewSize {
+		previewSize = len(embedResp.Vector)
+	}
+	fmt.Println("前几个维度:", embedResp.Vector[:previewSize])
 }

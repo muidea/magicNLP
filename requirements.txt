@@ -1,0 +1,9 @@
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+flask>=3.0,<4
+gunicorn>=22,<24
+jieba>=0.42.1,<0.43
+numpy>=1.26,<3
+sentence-transformers>=3.0,<6
+torch>=2.2,<3

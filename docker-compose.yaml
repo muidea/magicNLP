@@ -1,12 +1,24 @@
 services:
   nlp_api_server:
-    image: muidea/sbert-runner:1.0.0
+    build:
+      context: .
+    image: muidea/magicnlp:latest
     container_name: nlp_api_server
-    working_dir: /app
+    environment:
+      EMBED_MODEL: ${EMBED_MODEL:-thenlper/gte-small}
+      LOCAL_FILES_ONLY: ${LOCAL_FILES_ONLY:-false}
+      HF_HOME: /root/.cache/huggingface
     volumes:
-      - ${PWD}/embedding/embed_server.py:/app/embed_server.py
-      - ${PWD}/embedding/huggingface:/root/.cache/huggingface
-    command: gunicorn -b 0.0.0.0:8080 embed_server:app
+      - huggingface_cache:/root/.cache/huggingface
+    command: >
+      gunicorn -b 0.0.0.0:8080
+      --workers ${GUNICORN_WORKERS:-1}
+      --threads ${GUNICORN_THREADS:-4}
+      --timeout ${GUNICORN_TIMEOUT:-300}
+      embed_server:app
     ports:
-      - 8010:8080
+      - "${NLP_PORT:-8010}:8080"
     restart: unless-stopped
+
+volumes:
+  huggingface_cache:

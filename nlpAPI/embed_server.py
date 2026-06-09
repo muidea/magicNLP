@@ -7,12 +7,13 @@ import os
 import time
 
 app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ===========================
 # 模型加载（可通过环境变量选择）
 # ===========================
 MODEL_NAME = os.getenv("EMBED_MODEL", "thenlper/gte-small")
-LOCAL_FILES_ONLY = bool(os.getenv("LOCAL_FILES_ONLY", "True") == "True")
+LOCAL_FILES_ONLY = os.getenv("LOCAL_FILES_ONLY", "false").lower() in ("1", "true", "yes", "on")
 
 print(f"Loading embedding model: {MODEL_NAME}, local_files_only={LOCAL_FILES_ONLY}")
 model = SentenceTransformer(MODEL_NAME, local_files_only=LOCAL_FILES_ONLY)
@@ -32,9 +33,9 @@ def load_wordlist(filepath):
         print(f"{filepath} 文件未找到")
     return words
 
-stopwords_zh = load_wordlist("stopwords_zh.txt")
-stopwords_en = load_wordlist("stopwords_en.txt")
-blacklist = load_wordlist("blacklist.txt")
+stopwords_zh = load_wordlist(os.path.join(BASE_DIR, "stopwords_zh.txt"))
+stopwords_en = load_wordlist(os.path.join(BASE_DIR, "stopwords_en.txt"))
+blacklist = load_wordlist(os.path.join(BASE_DIR, "blacklist.txt"))
 
 # ===========================
 # 文本预处理
@@ -341,7 +342,7 @@ def keywords_api():
     }
     """
     try:
-        data = request.json
+        data = json_payload()
         text = data.get("text", "").strip()
         top_k = int(data.get("top_k", 10))
         business_context = data.get("business_context", None)
@@ -363,6 +364,7 @@ def keywords_api():
 # ---------------------------
 # 健康检查接口
 # ---------------------------
+@app.route("/health", methods=["GET"])
 @app.route(f"{API_PREFIX}/health", methods=["GET"])
 def health_check():
     """
