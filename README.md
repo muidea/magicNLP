@@ -17,6 +17,8 @@ magicNLP 是一个轻量级 NLP HTTP 服务，基于 `sentence-transformers` 提
 ├── Dockerfile
 ├── docker-compose.yaml
 ├── requirements.txt
+├── cache/
+│   └── huggingface/
 ├── nlpAPI/
 │   ├── embed_server.py
 │   ├── stopwords_zh.txt
@@ -28,7 +30,7 @@ magicNLP 是一个轻量级 NLP HTTP 服务，基于 `sentence-transformers` 提
 
 ## 快速开始：Docker Compose
 
-首次启动会自动下载模型到 Docker volume，后续会复用缓存。
+首次启动会自动下载模型到项目本地目录 `cache/huggingface/`，后续会复用该目录缓存。Compose 使用本地目录 bind mount，不依赖 Docker named volumes，方便打包、迁移和离线部署。
 
 ```bash
 git clone git@github.com:muidea/magicNLP.git
@@ -50,6 +52,8 @@ curl http://127.0.0.1:8010/health
 ```bash
 docker compose down
 ```
+
+清理本地模型缓存时删除 `cache/huggingface/` 下的内容即可；目录本身由仓库保留。
 
 ## 快速开始：本地 Python
 
@@ -95,7 +99,7 @@ EMBED_MODEL=BAAI/bge-small-zh-v1.5
 LOCAL_FILES_ONLY=false
 ```
 
-离线部署时，先在联网环境启动一次服务让模型下载到缓存，再拷贝 Hugging Face 缓存目录，启动时设置：
+离线部署时，先在联网环境启动一次服务让模型下载到 `cache/huggingface/`，再连同该目录一起拷贝到目标机器，启动时设置：
 
 ```env
 LOCAL_FILES_ONLY=true

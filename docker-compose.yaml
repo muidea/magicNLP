@@ -12,7 +12,7 @@ services:
       EMBED_PASSAGE_PREFIX: "${EMBED_PASSAGE_PREFIX:-passage: }"
       HF_HOME: /root/.cache/huggingface
     volumes:
-      - huggingface_cache:/root/.cache/huggingface
+      - ./cache/huggingface:/root/.cache/huggingface
     command: >
       gunicorn -b 0.0.0.0:8080
       --workers ${GUNICORN_WORKERS:-1}
@@ -22,6 +22,3 @@ services:
     ports:
       - "${NLP_PORT:-8010}:8080"
     restart: unless-stopped
-
-volumes:
-  huggingface_cache:

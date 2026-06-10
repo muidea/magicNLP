@@ -42,7 +42,11 @@ pip-delete-this-directory.txt
 .env
 .venv/
 .cache/
-huggingface/
+cache/*
+!cache/.gitkeep
+!cache/huggingface/
+cache/huggingface/*
+!cache/huggingface/.gitkeep
 models/
 
 # Unit test / coverage reports
