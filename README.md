@@ -84,6 +84,7 @@ python embed_server.py
 | --- | --- | --- |
 | `EMBED_MODEL` | `intfloat/multilingual-e5-small` | sentence-transformers 模型名或本地模型路径 |
 | `LOCAL_FILES_ONLY` | `false` | 是否只使用本地 Hugging Face 缓存；离线部署设为 `true` |
+| `HF_ENDPOINT` | `https://hf-mirror.com` | Hugging Face 下载端点；网络可直连时可改为官方默认端点 |
 | `EMBED_DEFAULT_INPUT_TYPE` | `passage` | 默认 embedding 输入类型，可选 `passage`、`query`、`raw` |
 | `EMBED_QUERY_PREFIX` | `query: ` | `input_type=query` 时自动添加的前缀 |
 | `EMBED_PASSAGE_PREFIX` | `passage: ` | `input_type=passage` 时自动添加的前缀 |
@@ -104,6 +105,8 @@ LOCAL_FILES_ONLY=false
 ```env
 LOCAL_FILES_ONLY=true
 ```
+
+如果启动日志里出现 `Connection reset by peer` 或 Hugging Face 连接失败，保持默认 `HF_ENDPOINT=https://hf-mirror.com` 后重新启动；模型下载成功后再切到 `LOCAL_FILES_ONLY=true`。
 
 ## 小型知识库/RAG 推荐用法
 

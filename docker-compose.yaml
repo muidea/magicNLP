@@ -11,6 +11,7 @@ services:
       EMBED_QUERY_PREFIX: "${EMBED_QUERY_PREFIX:-query: }"
       EMBED_PASSAGE_PREFIX: "${EMBED_PASSAGE_PREFIX:-passage: }"
       HF_HOME: /root/.cache/huggingface
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:
       - ./cache/huggingface:/root/.cache/huggingface
     command: >
